@@ -1,5 +1,6 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <WiFiUdp.h>
 
 //
 // WARNING!!! PSRAM IC required for UXGA resolution and high JPEG quality
@@ -37,10 +38,16 @@
 // ===========================
 // Enter your WiFi credentials
 // ===========================
-const char *ssid = "dlink";
+const char *ssid = "BELL034-Windpro";
 const char *password = "windpro67";
 
-void setupLedFlash(int pin);
+const char* udpAddress = "192.168.2.10";
+const int udpPort = 5005;
+WiFiUDP udp;
+
+#define UDP_PACKET_SIZE 1400
+
+static uint32_t frameId = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -130,11 +137,6 @@ void setup() {
   s->set_vflip(s, 1);
 #endif
 
-// Setup LED FLash if LED pin is defined in camera_pins.h
-#if defined(LED_GPIO_NUM)
-  setupLedFlash(LED_GPIO_NUM);
-#endif
-
   WiFi.begin(ssid, password);
   WiFi.setSleep(false);
 
@@ -146,17 +148,49 @@ void setup() {
   }
   Serial.println("");
   Serial.println("WiFi connected");
-
-  // startCameraServer();
-  WebServer webServer = WebServer();
-  webServer.start();
-
-  Serial.print("Camera Ready! Use 'http://");
-  Serial.print(WiFi.localIP());
-  Serial.println("' to connect");
 }
 
 void loop() {
-  // Do nothing. Everything is done in another task by the web server
-  delay(10000);
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    return;
+  }
+
+  size_t fb_len = fb->len;
+  uint8_t *fb_buf = fb->buf;
+  frameId++;
+
+  const int headerSize = 8;
+  int maxPayloadSize = UDP_PACKET_SIZE - headerSize;
+  int totalPackets = fb_len / maxPayloadSize;
+  if (fb_len % maxPayloadSize != 0) totalPackets++;
+
+  int offset = 0;
+  for (int packetIndex = 0; packetIndex < totalPackets; packetIndex++) {
+    uint8_t header[8];
+    header[0] = (frameId >> 24) & 0xFF;
+    header[1] = (frameId >> 16) & 0xFF;
+    header[2] = (frameId >> 8)  & 0xFF;
+    header[3] = (frameId)       & 0xFF;
+    header[4] = (totalPackets >> 8) & 0xFF;
+    header[5] = (totalPackets)      & 0xFF;
+    header[6] = (packetIndex >> 8)  & 0xFF;
+    header[7] = (packetIndex)       & 0xFF;
+
+    int bytesRemaining = fb_len - offset;
+    int payloadSize = (bytesRemaining > maxPayloadSize) ? maxPayloadSize : bytesRemaining;
+
+    udp.beginPacket(udpAddress, udpPort);
+    udp.write(header, headerSize);
+    udp.write(fb_buf + offset, payloadSize);
+    udp.endPacket();
+
+    offset += payloadSize;
+    delay(1);
+  }
+
+  esp_camera_fb_return(fb);
+
+  delay(33);
 }
