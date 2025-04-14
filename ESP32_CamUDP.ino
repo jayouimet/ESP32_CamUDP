@@ -35,11 +35,14 @@
 #include "camera_pins.h"
 #include "web_server.h"
 
+// Your wifi credentials, create a WiFiCredentials.h file and define SSID and PASSWORD
+#include "WiFiCredentials.h"
+
 // ===========================
 // Enter your WiFi credentials
 // ===========================
-const char *ssid = "BELL034-Windpro";
-const char *password = "windpro67";
+const char *ssid = SSID;
+const char *password = PASSWORD;
 
 const char* udpAddress = "192.168.2.10";
 const int udpPort = 5005;
